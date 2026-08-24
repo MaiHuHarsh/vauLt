@@ -1,0 +1,85 @@
+**Complete architecture**
+
+```mermaid
+flowchart TB
+    subgraph CLIENT[Client Layer]
+        FE[Frontend<br/>HTML + JS pages]
+    end
+
+    subgraph BACKEND[FastAPI Backend]
+        AUTH[Auth Module<br/>JWT login, token verify]
+        RBAC[Permission Middleware<br/>ACCESS_CONTROL check]
+        ROUTES[API Routes<br/>cases, documents, evidence, audit]
+        CRYPTO[Crypto Module<br/>AES-256-GCM encrypt/decrypt]
+        HASHCHAIN[Integrity Module<br/>SHA-256 hash, audit chain]
+        OCR[OCR/AI Module<br/>Tesseract, auto-tagging]
+        STORAGE_SDK[Storage Module<br/>MinIO SDK wrapper]
+    end
+
+    subgraph DATA[Data Layer]
+        PG[(Postgres<br/>users, cases, documents,<br/>evidence, access_control, audit_logs)]
+        MINIO[(MinIO<br/>encrypted document objects)]
+    end
+
+    FE -->|REST + JWT| AUTH
+    AUTH --> RBAC
+    RBAC --> ROUTES
+    ROUTES --> CRYPTO
+    ROUTES --> OCR
+    CRYPTO --> HASHCHAIN
+    ROUTES --> STORAGE_SDK
+    STORAGE_SDK --> MINIO
+    ROUTES --> PG
+    HASHCHAIN --> PG
+    OCR --> PG
+
+flowchart TD
+    START([User action]) --> TYPE{Action type}
+
+    %% Upload flow
+    TYPE -->|Upload document| U1[Check permission on case]
+    U1 --> U2[Hash original file - SHA256]
+    U2 --> U3[Encrypt file - AES256GCM]
+    U3 --> U4[Store ciphertext in MinIO]
+    U4 --> U5[Save DOCUMENT_VERSION + FILE_OBJECT]
+    U5 --> U6[Run OCR - extract text, AI tags]
+    U6 --> U7[Write audit log - chained hash]
+    U7 --> DONE1([Upload complete])
+
+    %% Retrieve flow
+    TYPE -->|View/Download document| R1{Access allowed?}
+    R1 -->|No| R1X[Log access_denied]
+    R1X --> DONE2([Blocked])
+    R1 -->|Yes| R2[Fetch ciphertext from MinIO]
+    R2 --> R3[Decrypt with stored key]
+    R3 --> R4{Hash matches file_hash?}
+    R4 -->|No| R4X[Flag tampered, block delivery]
+    R4X --> DONE3([Blocked - tamper alert])
+    R4 -->|Yes| R5[Serve file to user]
+    R5 --> R6[Write audit log]
+    R6 --> DONE4([Document delivered])
+
+    %% Evidence transfer flow
+    TYPE -->|Transfer evidence| E1[Create EVIDENCE_TRANSFER row]
+    E1 --> E2[Both parties sign - DIGITAL_SIGNATURE]
+    E2 --> E3{Receiver accepts?}
+    E3 -->|No| E3X[Mark transfer rejected]
+    E3X --> DONE5([Transfer rejected, logged])
+    E3 -->|Yes| E4[Update EVIDENCE.current_holder]
+    E4 --> E5[Write audit log]
+    E5 --> DONE6([Custody transferred])
+
+    %% Access control flow
+    TYPE -->|Grant/revoke access| A1[Admin selects user + case/doc]
+    A1 --> A2[Insert/update ACCESS_CONTROL row]
+    A2 --> A3[Set expires_at if temporary]
+    A3 --> A4[Write audit log]
+    A4 --> DONE7([Access updated])
+
+    %% Verify integrity flow
+    TYPE -->|Verify integrity| V1[Walk AUDIT_LOGS chain]
+    V1 --> V2{prev_hash matches<br/>recomputed hash?}
+    V2 -->|No| V2X[Report break point - user, timestamp]
+    V2X --> DONE8([Tamper detected])
+    V2 -->|Yes| V3[Chain intact confirmation]
+    V3 --> DONE9([Integrity verified])
