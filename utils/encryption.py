@@ -2,32 +2,37 @@ import os, base64
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
 
-
+# TO GET MASTER KEY
 def GET_MASTER_KEY() -> bytes: 
     load_dotenv()
     return base64.b64decode(os.getenv("MASTER_KEY"))
-    
+
+
+#TO GENEREATE A KEY
 def key_gen(length :int) -> bytes:
     if (length == 0): 
         length = 256
     return AESGCM.generate_key(bit_length=length)
 
 
-def encrypt_text(text: str, key: bytes) -> bytes:
+def encrypt_key(key_to_encrypt: bytes, master_key: bytes) -> bytes:
 
-    if len(key) != 32:
-        raise ValueError("Key must be exactly 32 bytes (256 bits)")
+    if len(master_key) != 32:
+        raise ValueError("Master key must be exactly 32 bytes (256 bits)")
+
+    if len(key_to_encrypt) != 32:
+        raise ValueError("Encryption key must be exactly 32 bytes (256 bits)")
 
     nonce = os.urandom(12)
-    aesgcm = AESGCM(key)
+    aesgcm = AESGCM(master_key)
 
-    ciphertext = aesgcm.encrypt(
+    encrypted_key = aesgcm.encrypt(
         nonce,
-        text.encode("utf-8"),
+        key_to_encrypt,
         None
     )
 
-    return nonce + ciphertext
+    return nonce + encrypted_key
 
 
 def encrypt_file(file_path: str, key: bytes) -> bytes:
